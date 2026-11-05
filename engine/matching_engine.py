@@ -6,11 +6,7 @@ from engine.types import OrderType, Side
 
 
 class MatchingEngine:
-    """Match incoming orders against the resting liquidity in an OrderBook.
-
-    Trades execute at the resting (maker) order's price. Unfilled limit
-    quantities rest in the book; unfilled market quantities are cancelled.
-    """
+    """Match incoming orders against resting liquidity in an OrderBook."""
 
     def __init__(self, order_book: OrderBook | None = None) -> None:
         self.order_book = order_book if order_book is not None else OrderBook()
@@ -24,6 +20,8 @@ class MatchingEngine:
             raise ValueError("cancelled orders cannot be submitted")
         if order.is_filled:
             raise ValueError("filled orders cannot be submitted")
+        if self.order_book.get_order(order.order_id) is not None:
+            raise ValueError(f"duplicate active order ID: {order.order_id!r}")
 
         trades: list[Trade] = []
         resting_side = Side.SELL if order.side is Side.BUY else Side.BUY
@@ -32,7 +30,6 @@ class MatchingEngine:
             resting_order = self.order_book.peek_best_order(resting_side)
             if resting_order is None:
                 break
-
             if not self._prices_cross(order, resting_order):
                 break
 
@@ -50,19 +47,14 @@ class MatchingEngine:
             )
             if level is None:
                 raise RuntimeError("best order exists without a price level")
-
-            # Keep the price-level aggregate synchronized with partial fills.
             level.apply_fill_to_front(fill_quantity)
 
             if resting_order.is_filled:
-                # The fill method has already reduced the level aggregate to
-                # zero for this order; pop_front therefore removes zero more.
                 removed = self.order_book.pop_best_order(resting_side)
                 if removed is not resting_order:
                     raise RuntimeError("order-book best order changed unexpectedly")
 
             order.apply_fill(fill_quantity)
-
             buy_order_id = (
                 order.order_id if order.side is Side.BUY else resting_order.order_id
             )
@@ -86,10 +78,7 @@ class MatchingEngine:
             if order.order_type is OrderType.LIMIT:
                 self.order_book.add_order(order)
             else:
-                # Market orders never rest in the book. Mark any unfilled
-                # remainder as cancelled so its terminal state is explicit.
                 order.cancel()
-
         return trades
 
     @staticmethod

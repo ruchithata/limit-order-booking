@@ -24,17 +24,19 @@ class PriceLevel:
         if not isinstance(self.side, Side):
             raise TypeError("side must be a Side")
 
+    def _discard_cancelled_front(self) -> None:
+        while self.orders and self.orders[0].is_cancelled:
+            self.orders.popleft()
+
     @property
     def is_empty(self) -> bool:
-        """Return whether this price level contains no orders."""
+        self._discard_cancelled_front()
         return not self.orders
 
     def __len__(self) -> int:
-        """Return the number of orders stored at this price."""
-        return len(self.orders)
+        return sum(not order.is_cancelled for order in self.orders)
 
     def add_order(self, order: Order) -> None:
-        """Append a compatible live limit order to this price level."""
         if not isinstance(order, Order):
             raise TypeError("order must be an Order")
         if order.order_type is not OrderType.LIMIT:
@@ -47,24 +49,25 @@ class PriceLevel:
         self.total_quantity += order.remaining_quantity
 
     def peek_front(self) -> Order | None:
-        """Return the oldest order without removing it."""
+        self._discard_cancelled_front()
         return self.orders[0] if self.orders else None
 
     def pop_front(self) -> Order:
-        """Remove and return the oldest order."""
+        self._discard_cancelled_front()
         if not self.orders:
             raise IndexError("cannot pop from an empty price level")
         order = self.orders.popleft()
         self.total_quantity -= order.remaining_quantity
         return order
 
-    def apply_fill_to_front(self, quantity: int) -> Order:
-        """Apply a fill to the oldest order and update aggregate quantity.
+    def cancel_order(self, order: Order) -> None:
+        """Cancel an order resolved through OrderBook's active index."""
+        if order.is_cancelled or order.is_filled:
+            raise ValueError("order is already inactive")
+        order.cancel()
+        self.total_quantity -= order.remaining_quantity
 
-        A fully filled order remains at the front until the owning OrderBook
-        removes it with ``pop_best_order``. This lets the book perform its
-        normal empty-level and heap cleanup.
-        """
+    def apply_fill_to_front(self, quantity: int) -> Order:
         order = self.peek_front()
         if order is None:
             raise IndexError("cannot fill an empty price level")
