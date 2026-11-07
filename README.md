@@ -62,7 +62,6 @@ limit_order_book/
 │   ├── order_book.py      # OrderBook and OrderBookSnapshot models
 │   ├── order_index.py     # O(1) active order index
 │   ├── price_level.py     # FIFO queue for price tiers
-│   ├── snapshot.py        # Order-book snapshot models and types
 │   └── types.py           # Domain enums (Side, OrderType)
 ├── examples/
 │   └── basic_usage.py     # Runnable public API and snapshot demonstration

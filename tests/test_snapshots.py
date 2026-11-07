@@ -144,6 +144,77 @@ def test_snapshot_depth_limiting() -> None:
     assert book.asks(depth=1) == ((111, 5),)
 
 
+def test_snapshot_depth_zero_returns_empty_sides() -> None:
+    engine = MatchingEngine()
+    engine.submit_order(
+        Order(
+            order_id=1,
+            side=Side.BUY,
+            order_type=OrderType.LIMIT,
+            quantity=10,
+            price=100,
+        )
+    )
+    snapshot = engine.get_snapshot(depth=0)
+    assert snapshot.bids == ()
+    assert snapshot.asks == ()
+
+
+def test_snapshot_negative_depth_raises_value_error() -> None:
+    engine = MatchingEngine()
+    with pytest.raises(ValueError):
+        engine.get_snapshot(depth=-1)
+
+
+@pytest.mark.parametrize("depth", [True, 1.5, "2"])
+def test_snapshot_rejects_invalid_depth_types(depth: object) -> None:
+    engine = MatchingEngine()
+    with pytest.raises(TypeError):
+        engine.get_snapshot(depth=depth)  # type: ignore[arg-type]
+
+
+def test_snapshot_is_unchanged_after_new_order() -> None:
+    engine = MatchingEngine()
+    engine.submit_order(
+        Order(
+            order_id=1,
+            side=Side.BUY,
+            order_type=OrderType.LIMIT,
+            quantity=10,
+            price=100,
+        )
+    )
+    old_snapshot = engine.get_snapshot()
+    engine.submit_order(
+        Order(
+            order_id=2,
+            side=Side.BUY,
+            order_type=OrderType.LIMIT,
+            quantity=5,
+            price=99,
+        )
+    )
+    new_snapshot = engine.get_snapshot()
+    assert old_snapshot.bids == ((100, 10),)
+    assert new_snapshot.bids == ((100, 10), (99, 5))
+
+
+def test_snapshot_updates_after_order_cancellation() -> None:
+    engine = MatchingEngine()
+    engine.submit_order(
+        Order(
+            order_id=1,
+            side=Side.BUY,
+            order_type=OrderType.LIMIT,
+            quantity=10,
+            price=100,
+        )
+    )
+    engine.cancel_order(1)
+    snapshot = engine.get_snapshot()
+    assert snapshot.bids == ()
+
+
 def test_snapshot_depth_validation() -> None:
     book = OrderBook()
     with pytest.raises(ValueError, match="depth must be non-negative"):

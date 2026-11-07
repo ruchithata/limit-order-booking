@@ -1,4 +1,4 @@
-"""Deterministic in-memory limit order book and matching engine."""
+"""Public API for the limit order book engine."""
 
 from engine.matching_engine import MatchingEngine
 from engine.order import Order, OrderId, Trade
