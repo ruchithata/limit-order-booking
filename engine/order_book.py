@@ -1,11 +1,132 @@
 """In-memory order book with heap-based best-price discovery."""
 
+from collections.abc import Iterable, Iterator
 from heapq import heappop, heappush
+from typing import Any
 
 from engine.order import Order, OrderId
 from engine.order_index import OrderIndex
 from engine.price_level import PriceLevel
 from engine.types import OrderType, Side
+
+
+class LevelSnapshot(tuple):
+    """An immutable price level containing price and aggregate quantity."""
+
+    __slots__ = ()
+
+    def __new__(cls, price: int, quantity: int) -> "LevelSnapshot":
+        if isinstance(price, bool) or not isinstance(price, int) or price <= 0:
+            raise ValueError("price must be a positive integer")
+        if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity <= 0:
+            raise ValueError("quantity must be a positive integer")
+        return super().__new__(cls, (price, quantity))
+
+    @property
+    def price(self) -> int:
+        """The price tick of this level."""
+        return self[0]
+
+    @property
+    def quantity(self) -> int:
+        """The aggregate available quantity across active orders at this price."""
+        return self[1]
+
+    def __getitem__(self, item: Any) -> Any:
+        if item == "price":
+            return self[0]
+        if item == "quantity":
+            return self[1]
+        return super().__getitem__(item)
+
+    def __repr__(self) -> str:
+        return f"LevelSnapshot(price={self[0]}, quantity={self[1]})"
+
+
+PriceLevelSnapshot = LevelSnapshot
+
+
+class OrderBookSnapshot:
+    """An immutable point-in-time snapshot of the order book's bids and asks.
+
+    Bids are ordered descending by price (highest bid first).
+    Asks are ordered ascending by price (lowest ask first).
+    """
+
+    __slots__ = ("_bids", "_asks")
+
+    def __init__(
+        self,
+        bids: Iterable[Any] = (),
+        asks: Iterable[Any] = (),
+    ) -> None:
+        def _to_levels(items: Iterable[Any]) -> tuple[LevelSnapshot, ...]:
+            levels: list[LevelSnapshot] = []
+            for item in items:
+                if isinstance(item, LevelSnapshot):
+                    levels.append(item)
+                elif isinstance(item, (tuple, list)) and len(item) == 2:
+                    levels.append(LevelSnapshot(item[0], item[1]))
+                else:
+                    raise TypeError(f"invalid price level in snapshot: {item!r}")
+            return tuple(levels)
+
+        object.__setattr__(self, "_bids", _to_levels(bids))
+        object.__setattr__(self, "_asks", _to_levels(asks))
+
+        if any(
+            self._bids[i].price <= self._bids[i + 1].price
+            for i in range(len(self._bids) - 1)
+        ):
+            raise ValueError("bid levels must be in descending price order")
+        if any(
+            self._asks[i].price >= self._asks[i + 1].price
+            for i in range(len(self._asks) - 1)
+        ):
+            raise ValueError("ask levels must be in ascending price order")
+
+    @property
+    def bids(self) -> tuple[LevelSnapshot, ...]:
+        """Active bid price levels in descending price order."""
+        return self._bids
+
+    @property
+    def asks(self) -> tuple[LevelSnapshot, ...]:
+        """Active ask price levels in ascending price order."""
+        return self._asks
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        raise AttributeError(f"{self.__class__.__name__} is immutable")
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError(f"{self.__class__.__name__} is immutable")
+
+    def __iter__(self) -> Iterator[tuple[LevelSnapshot, ...]]:
+        yield self._bids
+        yield self._asks
+
+    def __getitem__(self, item: Any) -> Any:
+        if item == "bids" or item == 0:
+            return self._bids
+        if item == "asks" or item == 1:
+            return self._asks
+        raise KeyError(item) if isinstance(item, str) else IndexError(item)
+
+    def __len__(self) -> int:
+        return 2
+
+    def __eq__(self, other: Any) -> bool:
+        if isinstance(other, OrderBookSnapshot):
+            return self._bids == other._bids and self._asks == other._asks
+        if isinstance(other, tuple) and len(other) == 2:
+            return (self._bids, self._asks) == other
+        return False
+
+    def __hash__(self) -> int:
+        return hash((self._bids, self._asks))
+
+    def __repr__(self) -> str:
+        return f"OrderBookSnapshot(bids={self._bids!r}, asks={self._asks!r})"
 
 
 class OrderBook:
@@ -94,6 +215,56 @@ class OrderBook:
             levels = self._bids if side is Side.BUY else self._asks
             del levels[level.price]
         return order
+
+    def get_snapshot(self, depth: int | None = None) -> OrderBookSnapshot:
+        """Return an immutable snapshot of the order book's bids and asks.
+
+        Bids are ordered descending by price (highest price first).
+        Asks are ordered ascending by price (lowest price first).
+        Only price levels with active (unfilled, non-cancelled) quantity are included.
+        """
+        if depth is not None:
+            if isinstance(depth, bool) or not isinstance(depth, int):
+                raise TypeError("depth must be an integer or None")
+            if depth < 0:
+                raise ValueError("depth must be non-negative")
+
+        bid_prices = sorted(
+            (price for price, level in self._bids.items() if level.total_quantity > 0),
+            reverse=True,
+        )
+        ask_prices = sorted(
+            price for price, level in self._asks.items() if level.total_quantity > 0
+        )
+
+        if depth is not None:
+            bid_prices = bid_prices[:depth]
+            ask_prices = ask_prices[:depth]
+
+        bids = tuple(
+            LevelSnapshot(price, self._bids[price].total_quantity)
+            for price in bid_prices
+        )
+        asks = tuple(
+            LevelSnapshot(price, self._asks[price].total_quantity)
+            for price in ask_prices
+        )
+        return OrderBookSnapshot(bids=bids, asks=asks)
+
+    def snapshot(self, depth: int | None = None) -> OrderBookSnapshot:
+        """Alias for get_snapshot."""
+        return self.get_snapshot(depth=depth)
+
+    def bids(self, depth: int | None = None) -> tuple[LevelSnapshot, ...]:
+        """Return an immutable snapshot of active bid levels."""
+        return self.get_snapshot(depth=depth).bids
+
+    def asks(self, depth: int | None = None) -> tuple[LevelSnapshot, ...]:
+        """Return an immutable snapshot of active ask levels."""
+        return self.get_snapshot(depth=depth).asks
+
+    get_bids = bids
+    get_asks = asks
 
     def validate_invariants(self) -> bool:
         """Raise AssertionError if internal book structures disagree.
