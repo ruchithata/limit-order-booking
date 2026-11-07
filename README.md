@@ -184,17 +184,15 @@ python -m benchmarks.run_benchmarks --quick
 
 ---
 
-## 6. Micro-Benchmark Baseline Results
+## 6. Performance Benchmarking & Profiling
 
-Ran on bare-metal hardware using Python 3.11:
+The project includes reproducible micro-benchmarks in the `benchmarks/` package to measure execution throughput and latency across order insertion, cancellation, matching, and snapshot generation on your local environment:
 
-```plaintext
---- Benchmark Results ---
-Total Orders   : 100,000
-Elapsed Time   : 0.2314 seconds
-Throughput     : ~432,000 orders/sec
-Mean Latency   : ~2.31 microseconds/order
+```bash
+python -m benchmarks.run_benchmarks
 ```
+
+Detailed methodology, workload specifications, and metrics are documented in [`benchmarks/README.md`](benchmarks/README.md).
 
 ---
 

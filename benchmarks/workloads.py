@@ -36,6 +36,19 @@ def generate_resting_orders(
     Asks are placed strictly above (mid_price + spread // 2).
     No executions will occur when submitted sequentially.
     """
+    if count < 0:
+        raise ValueError("count cannot be negative")
+    if min_qty <= 0:
+        raise ValueError("min_qty must be positive")
+    if max_qty < min_qty:
+        raise ValueError("max_qty must be greater than or equal to min_qty")
+    if mid_price <= 0:
+        raise ValueError("mid_price must be positive")
+    if spread < 0:
+        raise ValueError("spread cannot be negative")
+    if tick_range <= 0:
+        raise ValueError("tick_range must be positive")
+
     rng = Random(seed)
     orders: list[Order] = []
     max_bid = mid_price - (spread // 2)
@@ -72,8 +85,12 @@ def generate_cancellation_workload(
     spread: int = 20,
 ) -> CancellationWorkload:
     """Generate resting orders to populate the book and a subset of IDs to cancel."""
+    if book_size < 0:
+        raise ValueError("book_size cannot be negative")
     if cancel_count is None:
         cancel_count = book_size // 2
+    if cancel_count < 0:
+        raise ValueError("cancel_count cannot be negative")
     if cancel_count > book_size:
         raise ValueError("cancel_count cannot exceed book_size")
 
@@ -100,20 +117,31 @@ def generate_market_order_matching_workload(
     avg_resting_qty: int = 10,
 ) -> MatchingWorkload:
     """Generate resting limit orders and incoming market orders that cross them."""
+    if resting_count < 0:
+        raise ValueError("resting_count cannot be negative")
+    if market_order_count < 0:
+        raise ValueError("market_order_count cannot be negative")
+    if avg_resting_qty <= 0:
+        raise ValueError("avg_resting_qty must be positive")
+
+    min_resting_qty = max(1, avg_resting_qty // 2)
+    max_resting_qty = max(min_resting_qty, avg_resting_qty * 2)
+
     resting = generate_resting_orders(
         resting_count,
         seed=seed,
         mid_price=mid_price,
         spread=spread,
-        min_qty=avg_resting_qty // 2,
-        max_qty=avg_resting_qty * 2,
+        min_qty=min_resting_qty,
+        max_qty=max_resting_qty,
     )
     rng = Random(seed + 2)
     incoming: list[Order] = []
 
+    max_mkt_qty = max(1, avg_resting_qty * 3)
     for i in range(market_order_count):
         side = Side.BUY if rng.random() < 0.5 else Side.SELL
-        quantity = rng.randint(1, avg_resting_qty * 3)
+        quantity = rng.randint(1, max_mkt_qty)
         incoming.append(
             Order(
                 order_id=f"MKT-{i + 1}",
@@ -136,6 +164,17 @@ def generate_crossing_limit_workload(
     max_qty: int = 20,
 ) -> list[Order]:
     """Generate interleaved limit orders that frequently cross and trade."""
+    if count < 0:
+        raise ValueError("count cannot be negative")
+    if min_qty <= 0:
+        raise ValueError("min_qty must be positive")
+    if max_qty < min_qty:
+        raise ValueError("max_qty must be greater than or equal to min_qty")
+    if mid_price <= 0:
+        raise ValueError("mid_price must be positive")
+    if volatility < 0:
+        raise ValueError("volatility cannot be negative")
+
     rng = Random(seed)
     orders: list[Order] = []
 
@@ -166,6 +205,17 @@ def generate_multi_level_sweep_workload(
     tick_spacing: int = 5,
 ) -> MatchingWorkload:
     """Generate orders across multiple price tiers and large orders that sweep them."""
+    if levels_per_side <= 0:
+        raise ValueError("levels_per_side must be positive")
+    if orders_per_level <= 0:
+        raise ValueError("orders_per_level must be positive")
+    if qty_per_order <= 0:
+        raise ValueError("qty_per_order must be positive")
+    if mid_price <= 0:
+        raise ValueError("mid_price must be positive")
+    if tick_spacing <= 0:
+        raise ValueError("tick_spacing must be positive")
+
     resting: list[Order] = []
     order_num = 1
 
@@ -230,6 +280,17 @@ def generate_snapshot_workload(
     max_qty: int = 50,
 ) -> list[Order]:
     """Generate orders to populate an order book with many distinct price levels."""
+    if levels_per_side <= 0:
+        raise ValueError("levels_per_side must be positive")
+    if orders_per_level <= 0:
+        raise ValueError("orders_per_level must be positive")
+    if min_qty <= 0:
+        raise ValueError("min_qty must be positive")
+    if max_qty < min_qty:
+        raise ValueError("max_qty must be greater than or equal to min_qty")
+    if mid_price <= 0:
+        raise ValueError("mid_price must be positive")
+
     rng = Random(seed)
     orders: list[Order] = []
     order_num = 1

@@ -181,6 +181,78 @@ def test_measure_benchmark_returns_valid_metrics() -> None:
     assert call_count == 4  # 1 warmup + 3 repetitions
 
 
+def test_measure_benchmark_input_validation() -> None:
+    def dummy_setup() -> None:
+        return None
+
+    def dummy_run(_: object) -> None:
+        return None
+
+    with pytest.raises(ValueError, match="repetitions must be at least 1"):
+        measure_benchmark(
+            "test", "test", "desc", 10, dummy_setup, dummy_run, repetitions=0
+        )
+
+    with pytest.raises(ValueError, match="warmup cannot be negative"):
+        measure_benchmark("test", "test", "desc", 10, dummy_setup, dummy_run, warmup=-1)
+
+    with pytest.raises(ValueError, match="workload_size cannot be negative"):
+        measure_benchmark("test", "test", "desc", -5, dummy_setup, dummy_run)
+
+
+def test_workload_generators_input_validation() -> None:
+    # 1. generate_resting_orders
+    with pytest.raises(ValueError, match="count cannot be negative"):
+        generate_resting_orders(-1)
+    with pytest.raises(ValueError, match="min_qty must be positive"):
+        generate_resting_orders(10, min_qty=0)
+    with pytest.raises(ValueError, match="max_qty must be greater"):
+        generate_resting_orders(10, min_qty=10, max_qty=5)
+
+    # 2. generate_cancellation_workload
+    with pytest.raises(ValueError, match="book_size cannot be negative"):
+        generate_cancellation_workload(-1)
+    with pytest.raises(ValueError, match="cancel_count cannot be negative"):
+        generate_cancellation_workload(10, cancel_count=-1)
+    with pytest.raises(ValueError, match="cancel_count cannot exceed book_size"):
+        generate_cancellation_workload(10, cancel_count=15)
+
+    # 3. generate_market_order_matching_workload
+    with pytest.raises(ValueError, match="resting_count cannot be negative"):
+        generate_market_order_matching_workload(-1, 5)
+    with pytest.raises(ValueError, match="market_order_count cannot be negative"):
+        generate_market_order_matching_workload(5, -1)
+    with pytest.raises(ValueError, match="avg_resting_qty must be positive"):
+        generate_market_order_matching_workload(5, 5, avg_resting_qty=0)
+
+    # Edge case: avg_resting_qty=1 produces valid positive quantities
+    edge_workload = generate_market_order_matching_workload(
+        resting_count=10, market_order_count=5, avg_resting_qty=1
+    )
+    for order in edge_workload.resting_orders + edge_workload.incoming_orders:
+        assert order.quantity >= 1
+
+    engine = MatchingEngine()
+    for o in edge_workload.resting_orders:
+        engine.submit_order(o)
+    for m in edge_workload.incoming_orders:
+        engine.submit_order(m)
+
+    # 4. generate_crossing_limit_workload
+    with pytest.raises(ValueError, match="count cannot be negative"):
+        generate_crossing_limit_workload(-1)
+    with pytest.raises(ValueError, match="min_qty must be positive"):
+        generate_crossing_limit_workload(10, min_qty=0)
+
+    # 5. generate_multi_level_sweep_workload
+    with pytest.raises(ValueError, match="levels_per_side must be positive"):
+        generate_multi_level_sweep_workload(levels_per_side=0)
+
+    # 6. generate_snapshot_workload
+    with pytest.raises(ValueError, match="levels_per_side must be positive"):
+        generate_snapshot_workload(levels_per_side=0)
+
+
 def test_run_all_benchmarks_quick_smoke() -> None:
     results = run_all_benchmarks(quick=True, repetitions=1)
     suites = {r.suite for r in results}

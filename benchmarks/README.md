@@ -50,7 +50,7 @@ All synthetic workloads are generated deterministically using standard pseudoran
 
 ### 4. Order-Book Snapshots (`snapshot`)
 - **Workload**: Order books populated across 50 to 200 active price levels.
-- **Operations Measured**: Generating immutable [`OrderBookSnapshot`](file:///R:/projects/orders/limit-order-booking/engine/order_book.py) instances across full book depth and truncated slices (`depth=10`, `depth=50`).
+- **Operations Measured**: Generating immutable [`OrderBookSnapshot`](../engine/order_book.py) instances across full book depth and truncated slices (`depth=10`, `depth=50`).
 - **Complexity**: $O(P \log P)$ where $P$ is active price levels.
 
 ---
@@ -60,45 +60,29 @@ All synthetic workloads are generated deterministically using standard pseudoran
 1. **Zero Runtime Dependencies**: Timing uses standard Python `time.perf_counter()` with sub-microsecond resolution.
 2. **Warmup & Multi-Repetition Timing**: Each workload runs an unmeasured warmup pass to warm instruction caches and allocator pools, followed by $R$ measured repetitions (default: 3).
 3. **Isolated Setup per Repetition**: Every repetition operates on freshly initialized orders and engine state, ensuring that order state mutations (such as fill deductions and cancellation flags) never leak between runs.
-4. **Statistical Rigor**: Reports minimum elapsed time (best-case to filter OS preemption noise), arithmetic mean, standard deviation, operations per second (throughput), and mean latency per operation ($\mu\text{s}/\text{op}$).
+4. **Statistical Rigor**: Reports minimum elapsed time (best-case to filter OS preemption noise), arithmetic mean, standard deviation, operations per second (throughput based on mean duration), and mean latency per operation ($\mu\text{s}/\text{op}$).
 5. **Decoupled from CI / Unit Tests**: The test suite in `tests/test_benchmark_workloads.py` only validates workload generation correctness and runner metrics on miniature datasets, keeping `pytest` sub-second and immune to environment jitter.
 
 ---
 
-## 4. Baseline Results
+## 4. Benchmark Execution & Reporting
 
-Measured on Python 3.13 (x86-64, Windows):
+Run the benchmark suite to generate baseline metrics on your environment:
 
-```text
-==============================================================================================================
-                                LIMIT ORDER BOOK PERFORMANCE BENCHMARK REPORT                                 
-==============================================================================================================
-Benchmark                | Workload Details                   |     Size |  Min (s) | Mean (s) |    Throughput |   Latency
---------------------------------------------------------------------------------------------------------------
-[INSERTION]
-  Limit Order Insertion  | Insert 1,000 non-crossing limit or |    1,000 |   0.0024 |   0.0035 |  425,279 op/s |   3.46 us
-  Limit Order Insertion  | Insert 5,000 non-crossing limit or |    5,000 |   0.0141 |   0.0149 |  354,648 op/s |   2.99 us
-[CANCELLATION]
-  Order Cancellation     | Cancel 500 orders in book of size  |      500 |   0.0002 |   0.0002 | 2,863,689 op/s |   0.39 us
-  Order Cancellation     | Cancel 2,500 orders in book of siz |    2,500 |   0.0010 |   0.0015 | 2,523,214 op/s |   0.60 us
-[MATCHING]
-  Market Order Execution | 1,000 market orders against 2,000  |    1,000 |   0.0163 |   0.0174 |   61,518 op/s |  17.39 us
-  Crossing Limit Orders  | 1,000 continuous crossing limit or |    1,000 |   0.0059 |   0.0067 |  170,198 op/s |   6.73 us
-  Market Order Execution | 5,000 market orders against 10,000 |    5,000 |   0.0707 |   0.0730 |   70,692 op/s |  14.60 us
-  Crossing Limit Orders  | 5,000 continuous crossing limit or |    5,000 |   0.0570 |   0.0580 |   87,761 op/s |  11.61 us
-  Multi-Level Sweep      | Sweeping 25 price levels in restin |        2 |   0.0084 |   0.0089 |      238 op/s |   4.43 ms
-[SNAPSHOT]
-  OrderBook Snapshot     | 20 levels/side (depth=5, 200 calls |      200 |   0.0031 |   0.0050 |   65,100 op/s |  25.08 us
-  OrderBook Snapshot     | 20 levels/side (full depth, 200 ca |      200 |   0.0105 |   0.0113 |   18,963 op/s |  56.61 us
-  OrderBook Snapshot     | 50 levels/side (depth=5, 200 calls |      200 |   0.0041 |   0.0052 |   49,159 op/s |  25.93 us
-  OrderBook Snapshot     | 50 levels/side (full depth, 200 ca |      200 |   0.0254 |   0.0266 |    7,866 op/s | 132.97 us
-==============================================================================================================
+```bash
+python -m benchmarks.run_benchmarks
 ```
+
+The runner formats results in an ASCII table or JSON export (`--json`) reporting:
+- **Workload Size**: Number of operations executed in the timed block.
+- **Min & Mean Elapsed Time**: Best and average durations across repetitions.
+- **Throughput**: Mean operations processed per second ($\text{ops}/\text{sec}$).
+- **Mean Latency**: Average duration per operation ($\mu\text{s}/\text{op}$).
 
 ---
 
 ## 5. Architectural Discussion & Systems Trade-Offs
 
-- **Cancellation ($2.5\text{M}+ \text{ops/s}$)**: Soft tombstone cancellation through `OrderIndex` achieves sub-microsecond latency ($~0.4-0.6\mu\text{s}$) by marking `is_cancelled = True` without shifting deque elements.
-- **Insertion ($350\text{k}-425\text{k} \text{ops/s}$)**: Python `heapq` and dictionary hash lookups provide predictable $O(\log P)$ insertion.
-- **Snapshot Overhead ($O(P \log P)$)**: Slicing snapshots by `depth` significantly accelerates throughput ($65\text{k}$ snapshots/sec at `depth=5` vs $18\text{k}$ at full depth).
+- **Cancellation**: Soft tombstone cancellation through `OrderIndex` operates in $O(1)$ amortized time by marking `is_cancelled = True` in place, avoiding expensive $O(N)$ deque traversals.
+- **Insertion**: Python `heapq` and dictionary hash lookups provide predictable $O(\log P)$ insertion overhead where $P$ represents active price levels rather than order count $N$.
+- **Snapshot Overhead ($O(P \log P)$)**: Slicing snapshots by `depth` limits sorting to the top $N$ price tiers rather than the full active book.

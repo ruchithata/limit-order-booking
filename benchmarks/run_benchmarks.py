@@ -61,6 +61,13 @@ def measure_benchmark(
     setup_fn() is called before each run to initialize fresh data and engine state.
     Only the execution of run_fn(context) is timed with time.perf_counter().
     """
+    if repetitions < 1:
+        raise ValueError("repetitions must be at least 1")
+    if warmup < 0:
+        raise ValueError("warmup cannot be negative")
+    if workload_size < 0:
+        raise ValueError("workload_size cannot be negative")
+
     for _ in range(warmup):
         ctx = setup_fn()
         run_fn(ctx)
@@ -82,7 +89,7 @@ def measure_benchmark(
     max_s = max(durations)
     stdev_s = statistics.stdev(durations) if len(durations) > 1 else 0.0
 
-    throughput = (workload_size / min_s) if min_s > 0 else 0.0
+    throughput = workload_size / mean_s if mean_s > 0 and workload_size > 0 else 0.0
     latency_us = (mean_s / workload_size) * 1_000_000 if workload_size > 0 else 0.0
 
     return BenchmarkResult(
