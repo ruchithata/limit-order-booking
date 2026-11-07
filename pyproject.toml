@@ -40,7 +40,7 @@ pythonpath = ["."]
 [tool.ruff]
 line-length = 88
 target-version = "py310"
-src = ["engine", "tests"]
+src = ["engine", "tests", "benchmarks"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

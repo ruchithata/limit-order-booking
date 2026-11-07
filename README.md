@@ -55,6 +55,11 @@ The core engine contains no networking, external storage, or framework dependenc
 
 ```plaintext
 limit_order_book/
+├── benchmarks/
+│   ├── __init__.py        # Benchmark package initialization
+│   ├── workloads.py       # Deterministic synthetic order workload generators
+│   ├── run_benchmarks.py  # Benchmark harness and reporting tool
+│   └── README.md          # Benchmark methodology, suites, and profiling notes
 ├── engine/
 │   ├── __init__.py        # Public module exports (MatchingEngine, Order, OrderBook, etc.)
 │   ├── matching_engine.py # Continuous double-auction matching engine
@@ -66,6 +71,7 @@ limit_order_book/
 ├── examples/
 │   └── basic_usage.py     # Runnable public API and snapshot demonstration
 ├── tests/
+│   ├── test_benchmark_workloads.py
 │   ├── test_invariants.py
 │   ├── test_matching_engine.py
 │   ├── test_order.py
@@ -162,6 +168,18 @@ Demonstrates submitting limit orders, executing trades, and inspecting immutable
 
 ```bash
 python examples/basic_usage.py
+```
+
+### 4. Run Performance Benchmarks
+
+Measures order insertion, cancellation, matching, sweeps, and snapshots across reproducible synthetic workloads:
+
+```bash
+# Run full benchmark suite
+python -m benchmarks.run_benchmarks
+
+# Or run quick benchmarks for rapid feedback
+python -m benchmarks.run_benchmarks --quick
 ```
 
 ---
