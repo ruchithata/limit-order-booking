@@ -403,3 +403,23 @@ def test_order_book_snapshot_constructor_and_repr() -> None:
 
     with pytest.raises(KeyError):
         _ = snapshot["unknown"]
+
+
+def test_order_book_snapshot_rejects_unordered_bids() -> None:
+    with pytest.raises(
+        ValueError, match="bid levels must be in descending price order"
+    ):
+        OrderBookSnapshot(bids=[(99, 10), (100, 20)])
+
+    with pytest.raises(
+        ValueError, match="bid levels must be in descending price order"
+    ):
+        OrderBookSnapshot(bids=[(100, 10), (100, 20)])
+
+
+def test_order_book_snapshot_rejects_unordered_asks() -> None:
+    with pytest.raises(ValueError, match="ask levels must be in ascending price order"):
+        OrderBookSnapshot(asks=[(110, 5), (105, 10)])
+
+    with pytest.raises(ValueError, match="ask levels must be in ascending price order"):
+        OrderBookSnapshot(asks=[(105, 10), (105, 5)])

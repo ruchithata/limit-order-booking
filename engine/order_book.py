@@ -74,6 +74,17 @@ class OrderBookSnapshot:
         object.__setattr__(self, "_bids", _to_levels(bids))
         object.__setattr__(self, "_asks", _to_levels(asks))
 
+        if any(
+            self._bids[i].price <= self._bids[i + 1].price
+            for i in range(len(self._bids) - 1)
+        ):
+            raise ValueError("bid levels must be in descending price order")
+        if any(
+            self._asks[i].price >= self._asks[i + 1].price
+            for i in range(len(self._asks) - 1)
+        ):
+            raise ValueError("ask levels must be in ascending price order")
+
     @property
     def bids(self) -> tuple[LevelSnapshot, ...]:
         """Active bid price levels in descending price order."""
