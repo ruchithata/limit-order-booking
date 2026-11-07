@@ -34,6 +34,7 @@ The engine isolates the matching core entirely in RAM—avoiding disk I/O, datab
 | **New Limit Resting** | Binary Heap + Hash Map | $O(\log P)$ | $P$ represents active price tiers (hundreds), distinct from total orders $N$ (millions). |
 | **Trade Execution** | Doubly-ended Queue (`collections.deque`) | $O(1)$ per fill | Time priority ($FIFO$) appends to tail and consumes/pops directly from head. |
 | **Order Cancellation** | Inverted Hash Index + Tombstone | $O(1)$ amortized | Avoids $O(N)$ linear scans through queues by flagging cancellations in place. |
+| **Book Snapshot** | Sorted Price Tiers + Tuple | $O(P \log P)$ | Generates immutable view of active bids/asks without mutating or exposing internal heaps or deques. |
 
 ---
 
@@ -55,16 +56,26 @@ The core engine contains no networking, external storage, or framework dependenc
 ```plaintext
 limit_order_book/
 ├── engine/
-│   ├── __init__.py        # Public module exports
-│   ├── types.py           # Domain enums (Side, OrderType)
+│   ├── __init__.py        # Public module exports (MatchingEngine, Order, OrderBook, etc.)
+│   ├── matching_engine.py # Continuous double-auction matching engine
 │   ├── order.py           # Order and Trade dataclass models
-│   └── book.py            # Matching engine core & order book state
+│   ├── order_book.py      # OrderBook and OrderBookSnapshot models
+│   ├── order_index.py     # O(1) active order index
+│   ├── price_level.py     # FIFO queue for price tiers
+│   ├── snapshot.py        # Order-book snapshot models and types
+│   └── types.py           # Domain enums (Side, OrderType)
+├── examples/
+│   └── basic_usage.py     # Runnable public API and snapshot demonstration
 ├── tests/
-│   ├── __init__.py
-│   └── test_book.py       # Deterministic unit tests covering exchange edge cases
-├── benchmark/
-│   ├── __init__.py
-│   └── run_benchmark.py   # High-throughput synthetic burst micro-benchmark
+│   ├── test_invariants.py
+│   ├── test_matching_engine.py
+│   ├── test_order.py
+│   ├── test_order_book.py
+│   ├── test_order_cancellation.py
+│   ├── test_price_level.py
+│   ├── test_public_api.py
+│   ├── test_smoke.py
+│   └── test_snapshots.py
 ├── pyproject.toml         # Packaging & test configuration
 ├── .gitignore
 └── README.md
@@ -72,7 +83,52 @@ limit_order_book/
 
 ---
 
-## 4. Quickstart & Verification
+## 4. Public API & Usage
+
+All core interfaces can be imported directly from the `engine` package:
+
+```python
+from engine import MatchingEngine, Order, OrderType, Side
+
+# 1. Initialize the matching engine
+engine = MatchingEngine()
+
+# 2. Submit resting limit orders
+engine.submit_order(
+    Order(
+        order_id="B1", side=Side.BUY, order_type=OrderType.LIMIT, quantity=10, price=100
+    )
+)
+engine.submit_order(
+    Order(
+        order_id="S1", side=Side.SELL, order_type=OrderType.LIMIT, quantity=5, price=105
+    )
+)
+
+# 3. Take an immutable order-book snapshot (safe from internal mutations)
+snapshot = engine.get_snapshot()
+
+# Inspect bids (descending by price) and asks (ascending by price)
+print("Bids:", [(lvl.price, lvl.quantity) for lvl in snapshot.bids])  # [(100, 10)]
+print("Asks:", [(lvl.price, lvl.quantity) for lvl in snapshot.asks])  # [(105, 5)]
+
+# Limit snapshot depth to top N levels
+top1 = engine.get_snapshot(depth=1)
+
+# 4. Submit a matching order (generates Trade records)
+trades = engine.submit_order(
+    Order(order_id="M1", side=Side.BUY, order_type=OrderType.MARKET, quantity=3)
+)
+for trade in trades:
+    print(f"Trade #{trade.trade_id}: {trade.quantity} @ {trade.price}")
+
+# 5. Cancel a resting order in O(1) time
+engine.cancel_order("B1")
+```
+
+---
+
+## 5. Quickstart & Verification
 
 ### Prerequisites
 - Python 3.10 or higher
@@ -101,17 +157,17 @@ The test suite validates Price-Time ($FIFO$) ordering, partial fills, resting li
 pytest -v
 ```
 
-### 3. Run Micro-Benchmark
+### 3. Run Usage Example
 
-Measures order ingestion, crossing, and execution throughput across a burst of 100,000 synthetic orders:
+Demonstrates submitting limit orders, executing trades, and inspecting immutable snapshots:
 
 ```bash
-python -m benchmark.run_benchmark
+python examples/basic_usage.py
 ```
 
 ---
 
-## 5. Micro-Benchmark Baseline Results
+## 6. Micro-Benchmark Baseline Results
 
 Ran on bare-metal hardware using Python 3.11:
 
@@ -125,7 +181,7 @@ Mean Latency   : ~2.31 microseconds/order
 
 ---
 
-## 6. Next Steps & Production Systems Scaling
+## 7. Next Steps & Production Systems Scaling
 
 - **Intrusive Pre-allocated Memory Pools**: Porting this architecture to C++20 or OCaml to replace Python dynamic heap allocations with fixed-size contiguous memory blocks.
 - **Direct Tick Array Indexing**: Utilizing dense array indexing for price tiers within active bands, finding best bid/ask via bitboards (`__builtin_ctzll`) in single CPU cycles.
