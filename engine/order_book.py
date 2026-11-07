@@ -95,6 +95,52 @@ class OrderBook:
             del levels[level.price]
         return order
 
+    def validate_invariants(self) -> bool:
+        """Raise AssertionError if internal book structures disagree.
+
+        This diagnostic is intended for tests and debugging, not the matching
+        hot path. Stale heap entries are allowed because heap cleanup is lazy.
+        """
+        active_orders: dict[OrderId, tuple[Order, PriceLevel]] = {}
+        bid_heap_prices = {-price for price in self._bid_heap}
+        ask_heap_prices = set(self._ask_heap)
+
+        for side, levels, heap_prices in (
+            (Side.BUY, self._bids, bid_heap_prices),
+            (Side.SELL, self._asks, ask_heap_prices),
+        ):
+            for price, level in levels.items():
+                assert level.price == price, "price-level key does not match price"
+                assert level.side is side, "price level is stored on the wrong side"
+                assert price in heap_prices, "active price level is missing from heap"
+
+                expected_quantity = 0
+                for order in level.orders:
+                    if order.is_cancelled:
+                        continue
+                    assert not order.is_filled, "filled order remains in a price level"
+                    assert order.side is side, "order is stored on the wrong side"
+                    assert order.price == price, "order is stored at the wrong price"
+                    assert order.order_id not in active_orders, (
+                        "duplicate active order ID"
+                    )
+                    expected_quantity += order.remaining_quantity
+                    active_orders[order.order_id] = (order, level)
+
+                assert level.total_quantity == expected_quantity, (
+                    f"quantity mismatch at {side.value} price {price}: "
+                    f"{level.total_quantity} != {expected_quantity}"
+                )
+
+        indexed = self._order_index._entries
+        assert set(indexed) == set(active_orders), "order index IDs do not match book"
+        for order_id, (order, level) in active_orders.items():
+            indexed_order, indexed_level = indexed[order_id]
+            assert indexed_order is order, "order index points to a different order"
+            assert indexed_level is level, "order index points to a different level"
+        assert len(self._order_index) == len(active_orders)
+        return True
+
     def _best_level(self, side: Side) -> PriceLevel | None:
         if side is Side.BUY:
             heap, levels, reverse = self._bid_heap, self._bids, True
