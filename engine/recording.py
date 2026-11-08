@@ -1,9 +1,13 @@
 """Recording facade around the existing matching engine."""
 
+from __future__ import annotations
+
+from pathlib import Path
+
 from engine.event_log import EventLog
 from engine.matching_engine import MatchingEngine
 from engine.order import Order, OrderId, Trade
-from engine.order_book import OrderBookSnapshot
+from engine.order_book import OrderBook, OrderBookSnapshot
 
 
 class RecordingMatchingEngine:
@@ -51,6 +55,24 @@ class RecordingMatchingEngine:
 
     def best_ask_price(self) -> int | None:
         return self.matching_engine.best_ask_price()
+
+    @property
+    def next_trade_id(self) -> int:
+        return self.matching_engine.next_trade_id
+
+    @property
+    def order_book(self) -> OrderBook:
+        return self.matching_engine.order_book
+
+    def create_snapshot(self):
+        from engine.snapshot import EngineSnapshot
+
+        return EngineSnapshot.from_engine(self)
+
+    def save_snapshot(self, path: str | Path) -> Path:
+        from engine.persistence import save_snapshot
+
+        return save_snapshot(self.create_snapshot(), path)
 
     def __len__(self) -> int:
         return len(self.matching_engine)

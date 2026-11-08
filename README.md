@@ -61,17 +61,24 @@ limit_order_book/
 │   ├── run_benchmarks.py  # Benchmark harness and reporting tool
 │   └── README.md          # Benchmark methodology, suites, and profiling notes
 ├── engine/
-│   ├── __init__.py        # Public module exports (MatchingEngine, Order, OrderBook, etc.)
+│   ├── __init__.py        # Public module exports
+│   ├── event_log.py       # Append-only deterministic command journal
 │   ├── matching_engine.py # Continuous double-auction matching engine
 │   ├── order.py           # Order and Trade dataclass models
-│   ├── order_book.py      # OrderBook and OrderBookSnapshot models
+│   ├── order_book.py      # OrderBook and LevelSnapshot/OrderBookSnapshot models
 │   ├── order_index.py     # O(1) active order index
+│   ├── persistence.py     # Atomic snapshot disk persistence and manager
 │   ├── price_level.py     # FIFO queue for price tiers
+│   ├── recording.py       # RecordingMatchingEngine facade
+│   ├── recovery.py        # Snapshot loading, replay gap check, and engine recovery
+│   ├── replay.py          # Deterministic engine replay
+│   ├── snapshot.py        # OrderSnapshot and EngineSnapshot serialization
 │   └── types.py           # Domain enums (Side, OrderType)
 ├── examples/
-│   └── basic_usage.py     # Runnable public API and snapshot demonstration
+│   └── basic_usage.py     # Runnable public API demonstration
 ├── tests/
 │   ├── test_benchmark_workloads.py
+│   ├── test_event_log.py
 │   ├── test_invariants.py
 │   ├── test_matching_engine.py
 │   ├── test_order.py
@@ -79,7 +86,10 @@ limit_order_book/
 │   ├── test_order_cancellation.py
 │   ├── test_price_level.py
 │   ├── test_public_api.py
+│   ├── test_recovery.py
+│   ├── test_replay.py
 │   ├── test_smoke.py
+│   ├── test_snapshot.py
 │   └── test_snapshots.py
 ├── pyproject.toml         # Packaging & test configuration
 ├── .gitignore
@@ -133,7 +143,77 @@ engine.cancel_order("B1")
 
 ---
 
-## 5. Quickstart & Verification
+## 5. State Persistence, Event Logging & Fast Recovery
+
+Replaying an entire event journal from inception becomes computationally prohibitive when an exchange core processes millions of orders. To achieve fast, crash-resilient recovery:
+
+1. **State Snapshotting (`EngineSnapshot`)**: Periodically captures active resting orders (preserving exact price-time FIFO ordering), next trade ID, and the last processed sequence number.
+2. **Atomic Persistence (`save_snapshot`, `SnapshotManager`)**: Writes snapshots via temp files with atomic rename to guarantee files on disk are never corrupted by process interruptions.
+3. **Deterministic Recovery (`recover_state`, `recover_recording_engine`)**: Restores engine state directly from the latest snapshot and replays only newer subsequent events, validating sequence continuity and order book invariants.
+
+```text
+                  RECOVERY WORKFLOW TOPOLOGY
+
+     [ Event Journal: events.jsonl ]
+      (Events 1 .. 1,000,000)
+              │
+              ├─── Events 1..500,000 (Already incorporated)
+              │
+     [ Snapshot: snapshot.json ] ───> Restore Engine State directly (O(Active Orders))
+      (Taken at sequence 500,000)
+              │
+              └─── Events 500,001..1,000,000 ───> Replay ONLY newer delta
+                                                         │
+                                                         ▼
+                                              [ Fully Restored Engine ]
+```
+
+### Persistence and Recovery Example
+
+```python
+from engine import (
+    EventLog,
+    Order,
+    OrderType,
+    RecordingMatchingEngine,
+    Side,
+    load_snapshot,
+    recover_recording_engine,
+    recover_state,
+    save_snapshot,
+)
+
+# 1. Run engine with append-only event logging
+log = EventLog("events.jsonl")
+recorder = RecordingMatchingEngine(event_log=log)
+
+recorder.submit_order(Order("B1", Side.BUY, OrderType.LIMIT, 10, 100))
+recorder.submit_order(Order("S1", Side.SELL, OrderType.LIMIT, 5, 105))
+
+# 2. Periodically persist state snapshot atomically
+save_snapshot(recorder.create_snapshot(), "snapshot.json")
+
+# 3. Continue processing further orders
+recorder.submit_order(Order("B2", Side.BUY, OrderType.LIMIT, 8, 99))
+recorder.cancel_order("B1")
+
+# 4. Fast Recovery: load snapshot and replay only newer events (B2, cancel B1)
+result = recover_state(snapshot="snapshot.json", events="events.jsonl")
+recovered_engine = result.matching_engine
+
+print(f"Replayed {result.events_replayed} newer events")
+print("Bids:", [(lvl.price, lvl.quantity) for lvl in recovered_engine.bids()])
+
+# 5. Seamlessly resume recording new orders with contiguous sequence numbering
+active_recorder = recover_recording_engine(
+    snapshot="snapshot.json", event_log="events.jsonl"
+)
+active_recorder.submit_order(Order("B3", Side.BUY, OrderType.LIMIT, 4, 98))
+```
+
+---
+
+## 6. Quickstart & Verification
 
 ### Prerequisites
 - Python 3.10 or higher
@@ -184,7 +264,7 @@ python -m benchmarks.run_benchmarks --quick
 
 ---
 
-## 6. Performance Benchmarking & Profiling
+## 7. Performance Benchmarking & Profiling
 
 The project includes reproducible micro-benchmarks in the `benchmarks/` package to measure execution throughput and latency across order insertion, cancellation, matching, and snapshot generation on your local environment:
 
@@ -196,7 +276,7 @@ Detailed methodology, workload specifications, and metrics are documented in [`b
 
 ---
 
-## 7. Next Steps & Production Systems Scaling
+## 8. Next Steps & Production Systems Scaling
 
 - **Intrusive Pre-allocated Memory Pools**: Porting this architecture to C++20 or OCaml to replace Python dynamic heap allocations with fixed-size contiguous memory blocks.
 - **Direct Tick Array Indexing**: Utilizing dense array indexing for price tiers within active bands, finding best bid/ask via bitboards (`__builtin_ctzll`) in single CPU cycles.
