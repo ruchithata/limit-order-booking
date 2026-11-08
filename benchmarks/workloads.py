@@ -1,9 +1,54 @@
 """Reproducible synthetic trading workload generators for benchmarks."""
 
-from random import Random
-from typing import NamedTuple
+from __future__ import annotations
 
-from engine import Order, OrderId, OrderType, Side
+from dataclasses import dataclass
+from random import Random
+from typing import Any, Literal, NamedTuple
+
+from engine import Order, OrderId, OrderType, Side, Trade
+
+ActionKind = Literal["LIMIT", "MARKET", "CANCEL"]
+
+
+@dataclass(frozen=True, slots=True)
+class WorkloadAction:
+    """A single action in an interleaved trading stream."""
+
+    kind: ActionKind
+    order: Order | None = None
+    cancel_order_id: OrderId | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind in ("LIMIT", "MARKET"):
+            if not isinstance(self.order, Order):
+                raise TypeError(f"{self.kind} action requires an Order instance")
+            if self.cancel_order_id is not None:
+                raise ValueError(f"{self.kind} action cannot specify cancel_order_id")
+        elif self.kind == "CANCEL":
+            if self.cancel_order_id is None:
+                raise ValueError("CANCEL action requires a cancel_order_id")
+            if self.order is not None:
+                raise ValueError("CANCEL action cannot specify an order")
+        else:
+            raise ValueError(f"unknown action kind: {self.kind!r}")
+
+    def execute(self, engine: Any) -> list[Trade] | bool:
+        """Execute this action on a MatchingEngine or RecordingMatchingEngine."""
+        if self.kind in ("LIMIT", "MARKET"):
+            assert self.order is not None
+            return engine.submit_order(self.order)
+        elif self.kind == "CANCEL":
+            assert self.cancel_order_id is not None
+            return engine.cancel_order(self.cancel_order_id)
+        raise ValueError(f"unknown action kind: {self.kind!r}")
+
+
+class MixedWorkload(NamedTuple):
+    """Realistic workload of interleaved limit, market, and cancel actions."""
+
+    actions: list[WorkloadAction]
+    initial_resting_orders: list[Order]
 
 
 class CancellationWorkload(NamedTuple):
@@ -320,3 +365,138 @@ def generate_snapshot_workload(
             order_num += 1
 
     return orders
+
+
+def generate_mixed_workload(
+    count: int,
+    *,
+    initial_book_size: int = 1000,
+    limit_pct: float = 0.60,
+    market_pct: float = 0.20,
+    cancel_pct: float = 0.20,
+    seed: int = 42,
+    mid_price: int = 10000,
+    spread: int = 20,
+    volatility: int = 50,
+    min_qty: int = 1,
+    max_qty: int = 50,
+) -> MixedWorkload:
+    """Generate a realistic continuous stream of interleaved market actions.
+
+    Includes resting limit orders, crossing limit orders (aggressive matches),
+    market orders, and cancellations of previously resting active orders.
+    """
+    if count < 0:
+        raise ValueError("count cannot be negative")
+    if initial_book_size < 0:
+        raise ValueError("initial_book_size cannot be negative")
+    if limit_pct < 0 or market_pct < 0 or cancel_pct < 0:
+        raise ValueError("percentages cannot be negative")
+    total_pct = limit_pct + market_pct + cancel_pct
+    if total_pct <= 0:
+        raise ValueError("sum of action percentages must be positive")
+    if min_qty <= 0:
+        raise ValueError("min_qty must be positive")
+    if max_qty < min_qty:
+        raise ValueError("max_qty must be greater than or equal to min_qty")
+    if mid_price <= 0:
+        raise ValueError("mid_price must be positive")
+    if spread < 0:
+        raise ValueError("spread cannot be negative")
+    if volatility < 0:
+        raise ValueError("volatility cannot be negative")
+
+    market_p = market_pct / total_pct
+    cancel_p = cancel_pct / total_pct
+
+    initial_resting = (
+        generate_resting_orders(
+            initial_book_size,
+            seed=seed,
+            mid_price=mid_price,
+            spread=spread,
+            min_qty=min_qty,
+            max_qty=max_qty,
+        )
+        if initial_book_size > 0
+        else []
+    )
+
+    active_ids: list[OrderId] = [o.order_id for o in initial_resting]
+    rng = Random(seed + 10)
+    actions: list[WorkloadAction] = []
+
+    for i in range(count):
+        roll = rng.random()
+        if roll < cancel_p and active_ids:
+            # O(1) random pick and delete from active_ids list
+            idx = rng.randrange(len(active_ids))
+            cid = active_ids[idx]
+            active_ids[idx] = active_ids[-1]
+            active_ids.pop()
+            actions.append(WorkloadAction("CANCEL", cancel_order_id=cid))
+        elif roll < cancel_p + market_p:
+            side = Side.BUY if rng.random() < 0.5 else Side.SELL
+            qty = rng.randint(min_qty, max_qty)
+            mkt_order = Order(
+                order_id=f"MIX-M-{i + 1}",
+                side=side,
+                order_type=OrderType.MARKET,
+                quantity=qty,
+            )
+            actions.append(WorkloadAction("MARKET", order=mkt_order))
+        else:
+            side = Side.BUY if rng.random() < 0.5 else Side.SELL
+            qty = rng.randint(min_qty, max_qty)
+            is_crossing = rng.random() < 0.3
+            if is_crossing:
+                # Cross the spread to match immediately
+                if side is Side.BUY:
+                    price = mid_price + (spread // 2) + rng.randint(0, volatility)
+                else:
+                    price = max(
+                        1, mid_price - (spread // 2) - rng.randint(0, volatility)
+                    )
+            else:
+                # Place a passive resting order
+                if side is Side.BUY:
+                    price = max(
+                        1, mid_price - (spread // 2) - rng.randint(0, volatility)
+                    )
+                else:
+                    price = mid_price + (spread // 2) + rng.randint(0, volatility)
+
+            lim_id = f"MIX-L-{i + 1}"
+            lim_order = Order(
+                order_id=lim_id,
+                side=side,
+                order_type=OrderType.LIMIT,
+                quantity=qty,
+                price=price,
+            )
+            active_ids.append(lim_id)
+            actions.append(WorkloadAction("LIMIT", order=lim_order))
+
+    return MixedWorkload(actions=actions, initial_resting_orders=initial_resting)
+
+
+def generate_large_scale_workload(
+    count: int = 100_000,
+    *,
+    seed: int = 42,
+    mid_price: int = 10000,
+    spread: int = 20,
+    tick_range: int = 2000,
+    min_qty: int = 1,
+    max_qty: int = 100,
+) -> list[Order]:
+    """Generate large-scale non-crossing limit orders for high-volume stress testing."""
+    return generate_resting_orders(
+        count,
+        seed=seed,
+        mid_price=mid_price,
+        spread=spread,
+        tick_range=tick_range,
+        min_qty=min_qty,
+        max_qty=max_qty,
+    )

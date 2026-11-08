@@ -9,9 +9,13 @@ from benchmarks.run_benchmarks import (
 from benchmarks.workloads import (
     CancellationWorkload,
     MatchingWorkload,
+    MixedWorkload,
+    WorkloadAction,
     generate_cancellation_workload,
     generate_crossing_limit_workload,
+    generate_large_scale_workload,
     generate_market_order_matching_workload,
+    generate_mixed_workload,
     generate_multi_level_sweep_workload,
     generate_resting_orders,
     generate_snapshot_workload,
@@ -178,7 +182,7 @@ def test_measure_benchmark_returns_valid_metrics() -> None:
     assert res.mean_time_s >= 0.0
     assert res.throughput_ops_per_s > 0.0
     assert res.mean_latency_us >= 0.0
-    assert call_count == 4  # 1 warmup + 3 repetitions
+    assert call_count == 5  # 1 warmup + 3 repetitions + 1 memory pass
 
 
 def test_measure_benchmark_input_validation() -> None:
@@ -252,11 +256,86 @@ def test_workload_generators_input_validation() -> None:
     with pytest.raises(ValueError, match="levels_per_side must be positive"):
         generate_snapshot_workload(levels_per_side=0)
 
+    # 7. generate_mixed_workload validation
+    with pytest.raises(ValueError, match="count cannot be negative"):
+        generate_mixed_workload(-1)
+    with pytest.raises(ValueError, match="initial_book_size cannot be negative"):
+        generate_mixed_workload(10, initial_book_size=-1)
+    with pytest.raises(ValueError, match="percentages cannot be negative"):
+        generate_mixed_workload(10, limit_pct=-0.1)
+    with pytest.raises(ValueError, match="sum of action percentages must be positive"):
+        generate_mixed_workload(10, limit_pct=0, market_pct=0, cancel_pct=0)
+
+    # 8. WorkloadAction validation
+    with pytest.raises(ValueError, match="unknown action kind"):
+        WorkloadAction("INVALID")  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="LIMIT action requires an Order"):
+        WorkloadAction("LIMIT", order=None)
+    with pytest.raises(ValueError, match="CANCEL action requires a cancel_order_id"):
+        WorkloadAction("CANCEL", cancel_order_id=None)
+
+
+def test_generate_mixed_workload_execution() -> None:
+    workload = generate_mixed_workload(100, initial_book_size=30, seed=42)
+    assert isinstance(workload, MixedWorkload)
+    assert len(workload.initial_resting_orders) == 30
+    assert len(workload.actions) == 100
+
+    engine = MatchingEngine()
+    for o in workload.initial_resting_orders:
+        engine.submit_order(o)
+    assert len(engine) == 30
+
+    for act in workload.actions:
+        act.execute(engine)
+
+    assert engine.order_book.validate_invariants()
+
+
+def test_generate_large_scale_workload() -> None:
+    orders = generate_large_scale_workload(count=500, seed=77)
+    assert len(orders) == 500
+    engine = MatchingEngine()
+    for o in orders:
+        engine.submit_order(o)
+    assert len(engine) == 500
+    assert engine.order_book.validate_invariants()
+
+
+def test_measure_benchmark_captures_memory_usage() -> None:
+    def setup() -> list[int]:
+        return list(range(1000))
+
+    def run(data: list[int]) -> dict[str, int]:
+        allocated = [x * 2 for x in data]
+        return {"count": len(allocated)}
+
+    res = measure_benchmark(
+        name="Memory Test",
+        suite="test",
+        workload_description="Verify tracemalloc",
+        workload_size=1000,
+        setup_fn=setup,
+        run_fn=run,
+        repetitions=2,
+        warmup=1,
+        measure_memory=True,
+    )
+    assert res.peak_memory_bytes > 0
+    assert res.peak_memory_mb >= 0.0
+
 
 def test_run_all_benchmarks_quick_smoke() -> None:
     results = run_all_benchmarks(quick=True, repetitions=1)
     suites = {r.suite for r in results}
-    assert {"insertion", "cancellation", "matching", "snapshot"}.issubset(suites)
+    assert {
+        "insertion",
+        "cancellation",
+        "matching",
+        "mixed",
+        "snapshot",
+        "stress",
+    }.issubset(suites)
     assert len(results) > 0
     for r in results:
         assert r.throughput_ops_per_s > 0
