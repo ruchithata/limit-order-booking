@@ -76,8 +76,39 @@ python -m benchmarks.run_benchmarks
 The runner formats results in an ASCII table or JSON export (`--json`) reporting:
 - **Workload Size**: Number of operations executed in the timed block.
 - **Min & Mean Elapsed Time**: Best and average durations across repetitions.
-- **Throughput**: Mean operations processed per second ($\text{ops}/\text{sec}$).
-- **Mean Latency**: Average duration per operation ($\mu\text{s}/\text{op}$).
+- **Throughput**: Mean operations processed per second ($\text{ops}/\text{sec}$, calculated consistently from mean duration).
+- **Mean Latency**: Average duration per operation ($\mu\text{s}/\text{op}$, calculated consistently from mean duration).
+
+### Machine-Specific Sample Baseline
+
+> [!NOTE]
+> The figures below represent machine-specific benchmark measurements captured in a local development environment (Python 3.13.1 on x86-64 Windows, 13th Gen Intel Core i7). They are provided solely for illustrative reference and should not be interpreted as guaranteed or uniform performance across all hardware, operating systems, or Python runtimes. Run `python -m benchmarks.run_benchmarks` to establish a baseline for your specific environment.
+
+```text
+==============================================================================================================
+                                LIMIT ORDER BOOK PERFORMANCE BENCHMARK REPORT                                 
+==============================================================================================================
+Benchmark                | Workload Details                   |     Size |  Min (s) | Mean (s) |    Throughput |   Latency
+--------------------------------------------------------------------------------------------------------------
+[INSERTION]
+  Limit Order Insertion  | Insert 1,000 non-crossing limit or |    1,000 |   0.0027 |   0.0032 |  311,805 op/s |   3.21 us
+  Limit Order Insertion  | Insert 5,000 non-crossing limit or |    5,000 |   0.0120 |   0.0126 |  397,124 op/s |   2.52 us
+[CANCELLATION]
+  Order Cancellation     | Cancel 500 orders in book of size  |      500 |   0.0002 |   0.0002 | 2,515,934 op/s |   0.40 us
+  Order Cancellation     | Cancel 2,500 orders in book of siz |    2,500 |   0.0009 |   0.0011 | 2,304,006 op/s |   0.43 us
+[MATCHING]
+  Market Order Execution | 1,000 market orders against 2,000  |    1,000 |   0.0129 |   0.0145 |   68,947 op/s |  14.50 us
+  Crossing Limit Orders  | 1,000 continuous crossing limit or |    1,000 |   0.0060 |   0.0062 |  161,200 op/s |   6.20 us
+  Market Order Execution | 5,000 market orders against 10,000 |    5,000 |   0.0872 |   0.0884 |   56,573 op/s |  17.68 us
+  Crossing Limit Orders  | 5,000 continuous crossing limit or |    5,000 |   0.0375 |   0.0398 |  125,553 op/s |   7.96 us
+  Multi-Level Sweep      | Sweeping 25 price levels in restin |        2 |   0.0028 |   0.0037 |      548 op/s |   1.83 ms
+[SNAPSHOT]
+  OrderBook Snapshot     | 20 levels/side (depth=5, 200 calls |      200 |   0.0032 |   0.0039 |   51,553 op/s |  19.40 us
+  OrderBook Snapshot     | 20 levels/side (full depth, 200 ca |      200 |   0.0100 |   0.0127 |   15,798 op/s |  63.30 us
+  OrderBook Snapshot     | 50 levels/side (depth=5, 200 calls |      200 |   0.0043 |   0.0060 |   33,592 op/s |  29.77 us
+  OrderBook Snapshot     | 50 levels/side (full depth, 200 ca |      200 |   0.0263 |   0.0296 |    6,749 op/s | 148.18 us
+==============================================================================================================
+```
 
 ---
 
