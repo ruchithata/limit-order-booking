@@ -55,6 +55,11 @@ The core engine contains no networking, external storage, or framework dependenc
 
 ```plaintext
 limit_order_book/
+├── benchmarks/
+│   ├── __init__.py        # Benchmark package initialization
+│   ├── workloads.py       # Deterministic synthetic order workload generators
+│   ├── run_benchmarks.py  # Benchmark harness and reporting tool
+│   └── README.md          # Benchmark methodology, suites, and profiling notes
 ├── engine/
 │   ├── __init__.py        # Public module exports (MatchingEngine, Order, OrderBook, etc.)
 │   ├── matching_engine.py # Continuous double-auction matching engine
@@ -66,6 +71,7 @@ limit_order_book/
 ├── examples/
 │   └── basic_usage.py     # Runnable public API and snapshot demonstration
 ├── tests/
+│   ├── test_benchmark_workloads.py
 │   ├── test_invariants.py
 │   ├── test_matching_engine.py
 │   ├── test_order.py
@@ -164,19 +170,29 @@ Demonstrates submitting limit orders, executing trades, and inspecting immutable
 python examples/basic_usage.py
 ```
 
+### 4. Run Performance Benchmarks
+
+Measures order insertion, cancellation, matching, sweeps, and snapshots across reproducible synthetic workloads:
+
+```bash
+# Run full benchmark suite
+python -m benchmarks.run_benchmarks
+
+# Or run quick benchmarks for rapid feedback
+python -m benchmarks.run_benchmarks --quick
+```
+
 ---
 
-## 6. Micro-Benchmark Baseline Results
+## 6. Performance Benchmarking & Profiling
 
-Ran on bare-metal hardware using Python 3.11:
+The project includes reproducible micro-benchmarks in the `benchmarks/` package to measure execution throughput and latency across order insertion, cancellation, matching, and snapshot generation on your local environment:
 
-```plaintext
---- Benchmark Results ---
-Total Orders   : 100,000
-Elapsed Time   : 0.2314 seconds
-Throughput     : ~432,000 orders/sec
-Mean Latency   : ~2.31 microseconds/order
+```bash
+python -m benchmarks.run_benchmarks
 ```
+
+Detailed methodology, workload specifications, and metrics are documented in [`benchmarks/README.md`](benchmarks/README.md).
 
 ---
 
