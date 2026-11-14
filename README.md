@@ -58,7 +58,8 @@ limit_order_book/
 ├── benchmarks/
 │   ├── __init__.py        # Benchmark package initialization
 │   ├── workloads.py       # Deterministic synthetic order workload generators
-│   ├── run_benchmarks.py  # Benchmark harness and reporting tool
+│   ├── regression.py      # Benchmark regression comparator and baseline management
+│   ├── run_benchmarks.py  # Benchmark harness, memory profiler, and reporting tool
 │   └── README.md          # Benchmark methodology, suites, and profiling notes
 ├── engine/
 │   ├── __init__.py        # Public module exports
@@ -87,10 +88,12 @@ limit_order_book/
 │   ├── test_price_level.py
 │   ├── test_public_api.py
 │   ├── test_recovery.py
+│   ├── test_regression.py
 │   ├── test_replay.py
 │   ├── test_smoke.py
 │   ├── test_snapshot.py
-│   └── test_snapshots.py
+│   ├── test_snapshots.py
+│   └── test_stress.py
 ├── pyproject.toml         # Packaging & test configuration
 ├── .gitignore
 └── README.md
@@ -264,15 +267,29 @@ python -m benchmarks.run_benchmarks --quick
 
 ---
 
-## 7. Performance Benchmarking & Profiling
+## 7. Performance Benchmarking, Memory Profiling & Stress Testing
 
-The project includes reproducible micro-benchmarks in the `benchmarks/` package to measure execution throughput and latency across order insertion, cancellation, matching, and snapshot generation on your local environment:
+The engine includes reproducible micro-benchmarks, large-scale workloads (100,000+ orders), mixed order flows, high-volume stress tests, memory tracking (`tracemalloc`), and automated regression checks:
 
 ```bash
+# Run standard benchmark suite
 python -m benchmarks.run_benchmarks
+
+# Run quick benchmark smoke test
+python -m benchmarks.run_benchmarks --quick
+
+# Run large-scale workloads (up to 100,000+ orders)
+python -m benchmarks.run_benchmarks --large
+
+# Run dedicated high-volume stress testing suite
+python -m benchmarks.run_benchmarks --suite stress
+
+# Save and compare against baselines (regression checks without brittle CI thresholds)
+python -m benchmarks.run_benchmarks --save-baseline baseline.json
+python -m benchmarks.run_benchmarks --baseline baseline.json
 ```
 
-Detailed methodology, workload specifications, and metrics are documented in [`benchmarks/README.md`](benchmarks/README.md).
+Detailed methodology, workload specifications, memory profiling metrics, and regression detection are documented in [`benchmarks/README.md`](benchmarks/README.md).
 
 ---
 
